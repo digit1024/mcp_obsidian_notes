@@ -1,0 +1,47 @@
+# Rust build artifacts
+/target/
+Cargo.lock
+
+# Rust backup files
+**/*.rs.bk
+*.pdb
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Test artifacts
+test-results/
+*.test
+
+# Python (for test scripts)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# Temporary files
+*.tmp
+*.log
+*.bak
+
+# OS files
+Thumbs.db
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# Project specific
+MIGRATION_PLAN.md
+

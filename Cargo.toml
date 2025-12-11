@@ -1,0 +1,18 @@
+[package]
+name = "mcp_obsidian_notes"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rmcp = { version = "0.8.0", features = ["server", "transport-io"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+schemars = { version = "1.0", features = ["derive"] }
+anyhow = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1.10"
+walkdir = "2.4"
+glob = "0.3"
+
