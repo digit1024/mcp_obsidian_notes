@@ -6,9 +6,10 @@ An MCP (Model Context Protocol) server that provides access to Obsidian notes va
 
 - **File Operations**: List directories, read files, create/update notes, delete items
 - **Daily Notes**: Get daily notes with automatic date handling (today, yesterday, tomorrow, YYYY-MM-DD)
-- **Advanced Search**: Search across note content, filenames, and tags
+- **Search**: Search across note content, filenames, and tags with flexible filtering
 - **Note Relationships**: Find related notes based on shared tags or wikilinks
-- **Text Editing**: Insert or replace text at specific locations within notes
+- **Text Editing**: Replace text in notes or append to specific markdown sections
+- **Property Management**: Update Obsidian frontmatter properties (add, update, remove)
 - **Template System**: Create notes from templates with variable substitution
 - **Frontmatter Support**: Parse and manipulate YAML frontmatter in notes
 
@@ -17,84 +18,121 @@ An MCP (Model Context Protocol) server that provides access to Obsidian notes va
 ### Core File Operations
 
 #### `list_notes_directory`
-List notes directory contents with pagination to prevent context overflow. Shows immediate contents by default.
+List files and directories in a vault directory. Returns both files and directories by default. When recursive=true, only returns .md files from subdirectories.
 
 **Parameters:**
-- `path` (string, optional, default: "."): Directory path to list
+- `path` (string, optional, default: "."): Directory path relative to vault root (use '.' for root)
 - `limit` (number, optional, default: 50): Maximum items to return
-- `offset` (number, optional): Pagination offset
-- `recursive` (boolean, optional): Include subdirectories recursively
+- `offset` (number, optional, default: 0): Pagination offset
+- `recursive` (boolean, optional, default: false): If true, recursively search subdirectories and return only .md files. If false, returns immediate contents (files and directories)
+
+**Returns:** Empty array if path doesn't exist
 
 #### `read_notes_file`
-Read content of a specific file from the vault.
+Read a markdown note file from the vault. Returns content body (without frontmatter) and frontmatter separately as YAML metadata.
 
 **Parameters:**
-- `path` (string, required): Path to the file
+- `path` (string, required): Path to the note file relative to vault root. Can include or omit .md extension (auto-added if missing)
 
-**Returns:** File content with parsed frontmatter (if present)
+**Returns:** File content with parsed frontmatter (separated)
 
 #### `delete_notes_item`
-Delete a file or directory from the vault.
+Delete a file or directory from the vault. Deletes directories recursively.
 
 **Parameters:**
-- `path` (string, required): Path to the item to delete
+- `path` (string, required): Path to file or directory relative to vault root. For files, can include or omit .md extension. For directories, must not include .md extension
+
+**Returns:** Error if path doesn't exist
 
 #### `create_or_update_note`
-Create or update a note with content and frontmatter. Performs upsert operation - creates if doesn't exist, updates if it does with different modes: overwrite (default), append, or prepend.
+Create a new note or update existing one. Path should NOT include .md extension (auto-added). Mode options: 'overwrite' (default) - replaces entire file, 'append' - adds content after existing body, 'prepend' - adds content before existing body. Frontmatter is merged (new keys added, existing keys updated). Creates parent directories if needed.
 
 **Parameters:**
-- `path` (string, required): Path for the note (without .md extension)
-- `content` (string, required): Note content
-- `frontmatter` (object, optional): Frontmatter metadata
-- `mode` (string, optional): Update mode - "overwrite", "append", or "prepend" (default: "overwrite")
+- `path` (string, required): Path for the note relative to vault root. Should NOT include .md extension (auto-added)
+- `content` (string, required): Note content body (without frontmatter)
+- `frontmatter` (object, optional): YAML frontmatter metadata. If note exists, frontmatter is merged (new keys added, existing keys updated)
+- `mode` (string, optional, default: "overwrite"): Update mode - "overwrite" (replaces entire file), "append" (adds content after existing body), "prepend" (adds content before existing body)
 
 #### `get_daily_note`
-Get daily note for a specific date. Handles common daily note naming conventions and file locations.
+Get daily note for a date. Searches common locations: configured daily_notes_path, root, 'daily/', 'Daily Notes/'.
 
 **Parameters:**
-- `date` (string, optional, default: "today"): Date (today, yesterday, tomorrow, or YYYY-MM-DD)
+- `date` (string, optional, default: "today"): Date format: 'today', 'yesterday', 'tomorrow', or 'YYYY-MM-DD'
+
+**Returns:** Error message in content field if note not found
 
 ### Advanced Search & Discovery
 
 #### `search_vault`
-Search notes vault content across files, filenames, and metadata with advanced filtering.
+Search for text in vault notes. Query is literal text (case-sensitive substring match). Can specify multiple scopes. Returns file paths and match previews.
 
 **Parameters:**
-- `query` (string, required): Search query
-- `scope` (array, optional): Search scope - where to look for the query (options: "content", "filename", "tags", default: ["content", "filename"])
-- `path_filter` (string, optional): Limit search to specific path prefix
+- `query` (string, required): Search query - literal text (case-sensitive substring match)
+- `scope` (array, optional, default: ["content", "filename"]): Search scope: array of 'content' (note body), 'filename' (file paths), 'tags' (frontmatter tags). Can specify multiple
+- `path_filter` (string, optional): Limit search to specific subdirectory relative to vault root
 
 #### `find_related_notes`
-Find notes related to a given note based on shared tags, links, or backlinks.
+Find notes related to a source note. Extracts tags from source note's frontmatter and wikilinks [[...]] from content. Finds other notes that: (1) have matching tags in frontmatter, or (2) have filenames matching extracted link names.
 
 **Parameters:**
-- `path` (string, required): Path to the source note
-- `on` (array, optional): Relationship criteria to use for finding related notes (options: "tags", "links", default: ["tags", "links"])
+- `path` (string, required): Path to the source note relative to vault root. Can include or omit .md extension (auto-added)
+- `on` (array, optional, default: ["tags", "links"]): Relationship criteria: array of 'tags' and/or 'links'. Extracts tags from frontmatter and wikilinks [[...]] from content, then finds notes with matching tags or filenames
 
-#### `edit_note_text`
-Insert or replace text at specific locations within a note. Handles the common "find and modify" pattern without requiring manual text manipulation or position calculations. Automatically manages newlines and formatting. Returns error if pattern not found.
+**Returns:** Empty array if source note not found
+
+#### `replace_text_in_note`
+Replace text in a note. Finds target text and replaces it with new content. Simple find and replace operation.
 
 **Parameters:**
-- `path` (string, required): Path to the note file
-- `operation` (string, required): Type of edit to perform - "insert_after", "insert_before", or "replace"
-- `target` (string, required): Text to find within the note
-- `content` (string, required): Content to add or replace with
-- `in_new_line` (boolean, optional, default: true): Whether to add content on a new line (ignored for 'replace' operation)
+- `path` (string, required): Path to the note file relative to vault root. Can include or omit .md extension (auto-added)
+- `find` (string, required): Literal text to find within the note
+- `replace` (string, required): Replacement text. `\n` in string is converted to newline
+- `replace_all` (boolean, optional, default: true): If true, replaces all occurrences. If false, replaces only the first occurrence
+
+#### `append_to_section`
+Append text to a specific markdown section. Finds the section header and appends content before the next header of the same or higher level (or at end of file).
+
+**Parameters:**
+- `path` (string, required): Path to the note file relative to vault root. Can include or omit .md extension (auto-added)
+- `section_header` (string, required): Section header with # markers (e.g., '## End day'). Must include # to specify level. Whitespace is normalized. Must match exactly (level and text)
+- `text_to_append` (string, required): Text to append to the section. `\n` in string is converted to newline. Newline is automatically added before this text
+
+**Errors:**
+- Returns error if header level not specified (no # markers)
+- Returns error if section not found
+- Returns error if header level mismatch (e.g., looking for `# End day` but only `## End day` exists)
+- Returns error if multiple sections match (suggests using `replace_text_in_note` for precise targeting)
+
+#### `update_note_properties`
+Update frontmatter properties (Obsidian properties) in a note. Updates/adds properties and removes specified properties. Does not modify note content body. Creates frontmatter if it doesn't exist.
+
+**Parameters:**
+- `path` (string, required): Path to the note file relative to vault root. Can include or omit .md extension (auto-added)
+- `properties` (object, optional): Properties to update or add. Existing properties with same key are overwritten. New properties are added. Values can be strings, numbers, booleans, or arrays
+- `remove` (array of strings, optional): Property keys to remove from frontmatter
+
+**Examples:**
+- Update status: `{"properties": {"status": "done"}}`
+- Add multiple properties: `{"properties": {"priority": "high", "due-date": "2024-01-15", "completed": true}}`
+- Remove property: `{"remove": ["old-tag", "deprecated-field"]}`
+- Update and remove: `{"properties": {"status": "archived"}, "remove": ["active"]}`
 
 ### Template System
 
 #### `create_note_from_template`
-Create a new note by applying a template with simple variable substitution. Replaces `{{variable}}` placeholders in the template with provided values. Perfect for creating structured notes from predefined templates without manual copying and editing.
+Create note from template with variable substitution. Template path: if starts with '/' or contains ':', treated as absolute path relative to vault root; otherwise relative to templates directory (paths from list_notes_templates can be used directly).
 
 **Parameters:**
-- `path` (string, required): Destination path for the new note (including .md extension)
-- `template_path` (string, required): Path to the template file
-- `variables` (object, optional): Key-value pairs for template substitution (e.g., `{"date": "2024-01-15", "title": "Meeting Notes"}`)
+- `path` (string, required): Destination path for the new note relative to vault root. SHOULD include .md extension
+- `template_path` (string, required): Path to the template file. If starts with '/' or contains ':', treated as absolute path; otherwise relative to templates directory
+- `variables` (object, optional): Key-value pairs for template substitution. Replaces {{variable}} placeholders in template
 
 #### `list_notes_templates`
-List all available Notes templates in the templates directory with their paths and basic metadata. Helps discover existing templates before creating notes from them.
+List all .md template files in templates directory. Returns paths relative to templates directory (can be used directly with create_note_from_template).
 
 **Parameters:** None
+
+**Returns:** Template file paths, names, and sizes. Returns empty array if templates directory doesn't exist
 
 ## Building
 

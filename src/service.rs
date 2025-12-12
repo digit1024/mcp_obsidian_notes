@@ -25,13 +25,13 @@ pub struct ObsidianService {
 // Request/Response types
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ListNotesDirectoryRequest {
-    #[schemars(description = "Directory path to list (default: '.')")]
+    #[schemars(description = "Directory path relative to vault root (default: '.' for root)")]
     pub path: Option<String>,
     #[schemars(description = "Maximum items to return (default: 50)")]
     pub limit: Option<u32>,
-    #[schemars(description = "Pagination offset")]
+    #[schemars(description = "Pagination offset (default: 0)")]
     pub offset: Option<u32>,
-    #[schemars(description = "Include subdirectories recursively")]
+    #[schemars(description = "If true, recursively search subdirectories and return only .md files. If false (default), returns immediate contents (files and directories)")]
     pub recursive: Option<bool>,
 }
 
@@ -45,7 +45,7 @@ pub struct DirectoryItem {
 
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ReadNotesFileRequest {
-    #[schemars(description = "Path to the file")]
+    #[schemars(description = "Path to the note file relative to vault root. Can include or omit .md extension (auto-added if missing)")]
     pub path: String,
 }
 
@@ -58,35 +58,35 @@ pub struct FileContent {
 
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DeleteNotesItemRequest {
-    #[schemars(description = "Path to the item to delete")]
+    #[schemars(description = "Path to file or directory relative to vault root. For files, can include or omit .md extension. For directories, must not include .md extension. Deletes directories recursively.")]
     pub path: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CreateOrUpdateNoteRequest {
-    #[schemars(description = "Path for the note (without .md extension)")]
+    #[schemars(description = "Path for the note relative to vault root. Should NOT include .md extension (auto-added)")]
     pub path: String,
-    #[schemars(description = "Note content")]
+    #[schemars(description = "Note content body (without frontmatter)")]
     pub content: String,
-    #[schemars(description = "Frontmatter metadata")]
+    #[schemars(description = "YAML frontmatter metadata. If note exists, frontmatter is merged (new keys added, existing keys updated)")]
     pub frontmatter: Option<JsonMap<String, serde_json::Value>>,
-    #[schemars(description = "Update mode: overwrite, append, or prepend")]
+    #[schemars(description = "Update mode: 'overwrite' (default) - replaces entire file, 'append' - adds content after existing body, 'prepend' - adds content before existing body")]
     pub mode: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GetDailyNoteRequest {
-    #[schemars(description = "Date (today, yesterday, tomorrow, or YYYY-MM-DD)")]
+    #[schemars(description = "Date: 'today' (default), 'yesterday', 'tomorrow', or 'YYYY-MM-DD' format")]
     pub date: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SearchVaultRequest {
-    #[schemars(description = "Search query")]
+    #[schemars(description = "Search query - literal text (case-sensitive substring match)")]
     pub query: String,
-    #[schemars(description = "Search scope - where to look (options: 'content', 'filename', 'tags')")]
+    #[schemars(description = "Search scope: array of 'content' (note body), 'filename' (file paths), 'tags' (frontmatter tags). Can specify multiple. Default: ['content', 'filename']")]
     pub scope: Option<Vec<String>>,
-    #[schemars(description = "Limit search to specific path prefix")]
+    #[schemars(description = "Limit search to specific subdirectory relative to vault root")]
     pub path_filter: Option<String>,
 }
 
@@ -98,33 +98,51 @@ pub struct SearchResult {
 
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct FindRelatedNotesRequest {
-    #[schemars(description = "Path to the source note")]
+    #[schemars(description = "Path to the source note relative to vault root. Can include or omit .md extension (auto-added)")]
     pub path: String,
-    #[schemars(description = "Relationship criteria to use (options: 'tags', 'links')")]
+    #[schemars(description = "Relationship criteria: array of 'tags' and/or 'links'. Extracts tags from frontmatter and wikilinks [[...]] from content, then finds notes with matching tags or filenames. Default: ['tags', 'links']")]
     pub on: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct EditNoteTextRequest {
-    #[schemars(description = "Path to the note file")]
+pub struct ReplaceTextInNoteRequest {
+    #[schemars(description = "Path to the note file relative to vault root. Can include or omit .md extension (auto-added)")]
     pub path: String,
-    #[schemars(description = "Type of edit to perform")]
-    pub operation: String,
-    #[schemars(description = "Text to find within the note")]
-    pub target: String,
-    #[schemars(description = "Content to add or replace with")]
-    pub content: String,
-    #[schemars(description = "Whether to add content on a new line (ignored for 'replace')")]
-    pub in_new_line: Option<bool>,
+    #[schemars(description = "Literal text to find within the note")]
+    pub find: String,
+    #[schemars(description = "Replacement text. \\n in string is converted to newline")]
+    pub replace: String,
+    #[schemars(description = "If true (default), replaces all occurrences. If false, replaces only the first occurrence")]
+    pub replace_all: Option<bool>,
+}
+
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AppendToSectionRequest {
+    #[schemars(description = "Path to the note file relative to vault root. Can include or omit .md extension (auto-added)")]
+    pub path: String,
+    #[schemars(description = "Section header with # markers (e.g., '## End day'). Must include # to specify level. Whitespace is normalized. Must match exactly (level and text)")]
+    pub section_header: String,
+    #[schemars(description = "Text to append to the section. \\n in string is converted to newline. Newline is automatically added before this text")]
+    pub text_to_append: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct UpdateNotePropertiesRequest {
+    #[schemars(description = "Path to the note file relative to vault root. Can include or omit .md extension (auto-added)")]
+    pub path: String,
+    #[schemars(description = "Properties to update or add. Existing properties with same key are overwritten. New properties are added.")]
+    pub properties: Option<HashMap<String, serde_json::Value>>,
+    #[schemars(description = "Property keys to remove from frontmatter")]
+    pub remove: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CreateNoteFromTemplateRequest {
-    #[schemars(description = "Destination path for the new note (including .md extension)")]
+    #[schemars(description = "Destination path for the new note relative to vault root. SHOULD include .md extension")]
     pub path: String,
-    #[schemars(description = "Path to the template file")]
+    #[schemars(description = "Template path: if starts with '/' or contains ':', treated as absolute path relative to vault root; otherwise relative to templates directory (paths from list_notes_templates can be used directly)")]
     pub template_path: String,
-    #[schemars(description = "Key-value pairs for template substitution")]
+    #[schemars(description = "Key-value pairs for template substitution. Replaces {{variable}} placeholders in template")]
     pub variables: Option<HashMap<String, String>>,
 }
 
@@ -189,6 +207,68 @@ impl ObsidianService {
         } else {
             format!("{}.md", path)
         }
+    }
+
+    // Helper: Normalize newlines - convert \n to actual newlines
+    fn normalize_newlines(text: &str) -> String {
+        text.replace("\\n", "\n")
+    }
+
+    // Helper: Parse header line - returns (level, text) if it's a header
+    fn parse_header_line(line: &str) -> Option<(u32, String)> {
+        let trimmed = line.trim();
+        if !trimmed.starts_with('#') {
+            return None;
+        }
+        
+        let level = trimmed.chars().take_while(|c| *c == '#').count() as u32;
+        if level == 0 || level > 6 {
+            return None;
+        }
+        
+        let text = trimmed[level as usize..].trim().to_string();
+        if text.is_empty() {
+            return None;
+        }
+        
+        Some((level, text))
+    }
+
+    // Helper: Parse section header from user input
+    fn parse_section_header(header: &str) -> Result<(u32, String), String> {
+        let trimmed = header.trim();
+        
+        if !trimmed.starts_with('#') {
+            return Err("Header level must be specified. Provide header with # markers (e.g., '## End day')".to_string());
+        }
+        
+        let level = trimmed.chars().take_while(|c| *c == '#').count() as u32;
+        if level == 0 || level > 6 {
+            return Err("Invalid header level. Must be 1-6 (# to ######)".to_string());
+        }
+        
+        let text = trimmed[level as usize..].trim().to_string();
+        if text.is_empty() {
+            return Err("Header text cannot be empty".to_string());
+        }
+        
+        Ok((level, text))
+    }
+
+    // Helper: Find section matches in content - returns (line_number, level, text)
+    fn find_sections(content: &str, target_level: u32, target_text: &str) -> Vec<(usize, u32, String)> {
+        let lines: Vec<&str> = content.lines().collect();
+        let mut matches = Vec::new();
+        
+        for (line_num, line) in lines.iter().enumerate() {
+            if let Some((level, text)) = Self::parse_header_line(line) {
+                if level == target_level && text.trim() == target_text.trim() {
+                    matches.push((line_num, level, text));
+                }
+            }
+        }
+        
+        matches
     }
 
     // Helper: Parse frontmatter from content
@@ -260,7 +340,7 @@ impl ObsidianService {
         anyhow::bail!("Daily note not found for date: {}", date_str);
     }
 
-    #[tool(description = "List notes directory contents with pagination to prevent context overflow. Shows immediate contents by default.")]
+    #[tool(description = "List files and directories in a vault directory. Returns both files and directories by default. When recursive=true, only returns .md files from subdirectories. Path is relative to vault root (use '.' for root). Returns empty array if path doesn't exist.")]
     pub fn list_notes_directory(
         &self,
         Parameters(ListNotesDirectoryRequest { path, limit, offset, recursive }): Parameters<ListNotesDirectoryRequest>,
@@ -327,7 +407,7 @@ impl ObsidianService {
         Json(items)
     }
 
-    #[tool(description = "Read content of a specific file from the vault")]
+    #[tool(description = "Read a markdown note file from the vault. Path can include or omit .md extension (auto-added if missing). Path is relative to vault root. Returns content body (without frontmatter) and frontmatter separately as YAML metadata.")]
     pub fn read_notes_file(
         &self,
         Parameters(ReadNotesFileRequest { path }): Parameters<ReadNotesFileRequest>,
@@ -362,7 +442,7 @@ impl ObsidianService {
         }
     }
 
-    #[tool(description = "Delete a file or directory from the vault")]
+    #[tool(description = "Delete a file or directory from the vault. For files, path can include or omit .md extension. For directories, path must not include .md extension. Deletes directories recursively. Path is relative to vault root. Returns error if path doesn't exist.")]
     pub fn delete_notes_item(
         &self,
         Parameters(DeleteNotesItemRequest { path }): Parameters<DeleteNotesItemRequest>,
@@ -420,7 +500,7 @@ impl ObsidianService {
         }
     }
 
-    #[tool(description = "Create or update a note with content and frontmatter. Performs upsert operation - creates if doesn't exist, updates if it does with different modes: overwrite (default), append, or prepend.")]
+    #[tool(description = "Create a new note or update existing one. Path should NOT include .md extension (auto-added). Mode options: 'overwrite' (default) - replaces entire file, 'append' - adds content after existing body, 'prepend' - adds content before existing body. Frontmatter is merged (new keys added, existing keys updated). Creates parent directories if needed. Path is relative to vault root.")]
     pub fn create_or_update_note(
         &self,
         Parameters(CreateOrUpdateNoteRequest { path, content, frontmatter, mode }): Parameters<CreateOrUpdateNoteRequest>,
@@ -498,7 +578,7 @@ impl ObsidianService {
         }
     }
 
-    #[tool(description = "Get daily note for a specific date. Handles common daily note naming conventions and file locations.")]
+    #[tool(description = "Get daily note for a date. Date can be 'today' (default), 'yesterday', 'tomorrow', or 'YYYY-MM-DD' format. Searches common locations: configured daily_notes_path, root, 'daily/', 'Daily Notes/'. Returns error message in content field if note not found.")]
     pub fn get_daily_note(
         &self,
         Parameters(GetDailyNoteRequest { date }): Parameters<GetDailyNoteRequest>,
@@ -543,7 +623,7 @@ impl ObsidianService {
         }
     }
 
-    #[tool(description = "Search notes vault content across files, filenames, and metadata with advanced filtering")]
+    #[tool(description = "Search for text in vault notes. Query is literal text (case-sensitive substring match). Scope options: 'content' (note body), 'filename' (file paths), 'tags' (frontmatter tags). Can specify multiple scopes. path_filter limits search to specific subdirectory (relative to vault root). Returns file paths and match previews.")]
     pub fn search_vault(
         &self,
         Parameters(SearchVaultRequest { query, scope, path_filter }): Parameters<SearchVaultRequest>,
@@ -642,7 +722,7 @@ impl ObsidianService {
         Json(results)
     }
 
-    #[tool(description = "Find notes related to a given note based on shared tags, links, or backlinks")]
+    #[tool(description = "Find notes related to a source note. Extracts tags from source note's frontmatter and wikilinks [[...]] from content. Finds other notes that: (1) have matching tags in frontmatter, or (2) have filenames matching extracted link names. 'on' parameter controls which relationships to use: 'tags' and/or 'links'. Path is relative to vault root. Returns empty array if source note not found.")]
     pub fn find_related_notes(
         &self,
         Parameters(FindRelatedNotesRequest { path, on }): Parameters<FindRelatedNotesRequest>,
@@ -739,10 +819,10 @@ impl ObsidianService {
         Json(related)
     }
 
-    #[tool(description = "Insert or replace text at specific locations within a note. Handles the common 'find and modify' pattern without requiring manual text manipulation or position calculations. Automatically manages newlines and formatting. Returns error if pattern not found.")]
-    pub fn edit_note_text(
+    #[tool(description = "Replace text in a note. Finds target text and replaces it with new content. replace_all (default: true) controls whether to replace all occurrences or just the first. Path is relative to vault root, .md extension auto-added. Returns error if target text not found.")]
+    pub fn replace_text_in_note(
         &self,
-        Parameters(EditNoteTextRequest { path, operation, target, content, in_new_line }): Parameters<EditNoteTextRequest>,
+        Parameters(ReplaceTextInNoteRequest { path, find, replace, replace_all }): Parameters<ReplaceTextInNoteRequest>,
     ) -> Json<OperationResult> {
         let path_with_ext = self.ensure_md_extension(&path);
         let full_path = match self.validate_path(&path_with_ext) {
@@ -771,55 +851,35 @@ impl ObsidianService {
             }
         };
 
-        let in_new_line = in_new_line.unwrap_or(true);
-        let target_regex = match Regex::new(&regex::escape(&target)) {
+        let replace_all = replace_all.unwrap_or(true);
+        let normalized_replace = Self::normalize_newlines(&replace);
+        let find_regex = match Regex::new(&regex::escape(&find)) {
             Ok(re) => re,
             Err(e) => {
                 eprintln!("Invalid regex pattern: {}", e);
                 return Json(OperationResult {
-                success: false,
-                path: None,
-                error: Some(format!("Invalid pattern: {}", e)),
-                deleted_path: None,
-            });
+                    success: false,
+                    path: None,
+                    error: Some(format!("Invalid pattern: {}", e)),
+                    deleted_path: None,
+                });
             }
         };
 
-        let new_content = if !target_regex.is_match(&file_content) {
-            eprintln!("Target pattern not found in file");
+        if !find_regex.is_match(&file_content) {
+            eprintln!("Target text not found in file");
             return Json(OperationResult {
                 success: false,
                 path: None,
-                error: Some("Target pattern not found in file".to_string()),
+                error: Some("Target text not found in file".to_string()),
                 deleted_path: None,
             });
+        }
+
+        let new_content = if replace_all {
+            find_regex.replace_all(&file_content, &normalized_replace).to_string()
         } else {
-            match operation.as_str() {
-                "replace" => target_regex.replace_all(&file_content, &content).to_string(),
-                "insert_after" => {
-                    if in_new_line {
-                        target_regex.replace_all(&file_content, format!("{}\n{}", target, content)).to_string()
-                    } else {
-                        target_regex.replace_all(&file_content, format!("{}{}", target, content)).to_string()
-                    }
-                }
-                "insert_before" => {
-                    if in_new_line {
-                        target_regex.replace_all(&file_content, format!("{}\n{}", content, target)).to_string()
-                    } else {
-                        target_regex.replace_all(&file_content, format!("{}{}", content, target)).to_string()
-                    }
-                }
-                _ => {
-                    eprintln!("Invalid operation: {}", operation);
-                    return Json(OperationResult {
-                        success: false,
-                        path: None,
-                        error: Some(format!("Invalid operation: {}. Must be 'replace', 'insert_after', or 'insert_before'", operation)),
-                        deleted_path: None,
-                    });
-                }
-            }
+            find_regex.replace(&file_content, &normalized_replace).to_string()
         };
 
         match fs::write(&full_path, new_content) {
@@ -841,7 +901,240 @@ impl ObsidianService {
         }
     }
 
-    #[tool(description = "Create a new note by applying a template with simple variable substitution. Replaces `{{variable}}` placeholders in the template with provided values. Perfect for creating structured notes from predefined templates without manual copying and editing.")]
+    #[tool(description = "Append text to a specific markdown section. section_header must include # markers (e.g., '## End day') and must match exactly (level and text). Appends content before the next header of the same or higher level (or at end of file). Returns error if: header level not specified, section not found, level mismatch, or multiple sections match. Path is relative to vault root, .md extension auto-added.")]
+    pub fn append_to_section(
+        &self,
+        Parameters(AppendToSectionRequest { path, section_header, text_to_append }): Parameters<AppendToSectionRequest>,
+    ) -> Json<OperationResult> {
+        let path_with_ext = self.ensure_md_extension(&path);
+        let full_path = match self.validate_path(&path_with_ext) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("Invalid path {}: {}", path, e);
+                return Json(OperationResult {
+                    success: false,
+                    path: None,
+                    error: Some(format!("{}", e)),
+                    deleted_path: None,
+                });
+            }
+        };
+
+        let file_content = match fs::read_to_string(&full_path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Failed to read file {}: {}", path, e);
+                return Json(OperationResult {
+                    success: false,
+                    path: None,
+                    error: Some(format!("{}", e)),
+                    deleted_path: None,
+                });
+            }
+        };
+
+        // Parse section header
+        let (target_level, target_text) = match Self::parse_section_header(&section_header) {
+            Ok((level, text)) => (level, text),
+            Err(e) => {
+                return Json(OperationResult {
+                    success: false,
+                    path: None,
+                    error: Some(e),
+                    deleted_path: None,
+                });
+            }
+        };
+
+        // Find matching sections
+        let matches = Self::find_sections(&file_content, target_level, &target_text);
+        
+        match matches.len() {
+            0 => {
+                // Check if there's a level mismatch
+                let all_headers: Vec<_> = file_content.lines()
+                    .enumerate()
+                    .filter_map(|(i, line)| {
+                        Self::parse_header_line(line).map(|(level, text)| (i, level, text))
+                    })
+                    .filter(|(_, _, text)| text.trim() == target_text.trim())
+                    .collect();
+                
+                if !all_headers.is_empty() {
+                    let header_info: Vec<String> = all_headers.iter()
+                        .map(|(line, level, _)| format!("'{}' at line {}", "#".repeat(*level as usize), line + 1))
+                        .collect();
+                    return Json(OperationResult {
+                        success: false,
+                        path: None,
+                        error: Some(format!("Section not found. Header level mismatch. Looking for '{} {}' but found {}",
+                            "#".repeat(target_level as usize), target_text, header_info.join(", "))),
+                        deleted_path: None,
+                    });
+                }
+                
+                return Json(OperationResult {
+                    success: false,
+                    path: None,
+                    error: Some(format!("Section not found. No header matching '{} {}' found in file",
+                        "#".repeat(target_level as usize), target_text)),
+                    deleted_path: None,
+                });
+            }
+            1 => {
+                // Found exactly one match - proceed
+            }
+            n => {
+                let line_numbers: Vec<String> = matches.iter()
+                    .map(|(line, _, _)| (line + 1).to_string())
+                    .collect();
+                return Json(OperationResult {
+                    success: false,
+                    path: None,
+                    error: Some(format!("Multiple sections found. Found {} headers matching '{} {}' at lines {}. Use replace_text_in_note for precise targeting.",
+                        n, "#".repeat(target_level as usize), target_text, line_numbers.join(", "))),
+                    deleted_path: None,
+                });
+            }
+        }
+
+        let (target_line, _, _) = matches[0];
+        let lines: Vec<&str> = file_content.lines().collect();
+        
+        // Find insertion point: after target header, before next header of same or higher level
+        let mut insert_line = target_line + 1;
+        
+        // Find next header of same or higher level
+        for i in (target_line + 1)..lines.len() {
+            if let Some((level, _)) = Self::parse_header_line(lines[i]) {
+                if level <= target_level {
+                    // Found next header of same or higher level - insert before it
+                    insert_line = i;
+                    break;
+                }
+            }
+        }
+        // If no next header found, insert_line will be at end of file
+        
+        // Normalize newlines in text_to_append
+        let normalized_text = Self::normalize_newlines(&text_to_append);
+        
+        // Build new content
+        let mut new_lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
+        
+        // Determine if we need to add a newline before the text
+        // Always add a newline before the appended text for consistency
+        let text_to_insert = format!("\n{}", normalized_text);
+        
+        if insert_line >= new_lines.len() {
+            // Append to end of file
+            // Check if last line is empty - if so, don't add extra newline
+            if new_lines.is_empty() || new_lines[new_lines.len() - 1].trim().is_empty() {
+                new_lines.push(normalized_text);
+            } else {
+                new_lines.push(text_to_insert);
+            }
+        } else {
+            // Insert before the line
+            new_lines.insert(insert_line, text_to_insert);
+        }
+        
+        let new_content = new_lines.join("\n");
+        
+        match fs::write(&full_path, new_content) {
+            Ok(_) => Json(OperationResult {
+                success: true,
+                path: Some(path_with_ext),
+                error: None,
+                deleted_path: None,
+            }),
+            Err(e) => {
+                eprintln!("Failed to write file: {}", e);
+                Json(OperationResult {
+                    success: false,
+                    path: None,
+                    error: Some(format!("{}", e)),
+                    deleted_path: None,
+                })
+            }
+        }
+    }
+
+    #[tool(description = "Update frontmatter properties (Obsidian properties) in a note. Updates/adds properties from 'properties' map and removes properties listed in 'remove'. Does not modify note content body. Creates frontmatter if it doesn't exist. Path is relative to vault root, .md extension auto-added.")]
+    pub fn update_note_properties(
+        &self,
+        Parameters(UpdateNotePropertiesRequest { path, properties, remove }): Parameters<UpdateNotePropertiesRequest>,
+    ) -> Json<OperationResult> {
+        let path_with_ext = self.ensure_md_extension(&path);
+        let full_path = match self.validate_path(&path_with_ext) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("Invalid path {}: {}", path, e);
+                return Json(OperationResult {
+                    success: false,
+                    path: None,
+                    error: Some(format!("{}", e)),
+                    deleted_path: None,
+                });
+            }
+        };
+
+        let file_content = match fs::read_to_string(&full_path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Failed to read file {}: {}", path, e);
+                return Json(OperationResult {
+                    success: false,
+                    path: None,
+                    error: Some(format!("{}", e)),
+                    deleted_path: None,
+                });
+            }
+        };
+
+        // Parse frontmatter and body
+        let (existing_fm, body) = Self::parse_frontmatter(&file_content);
+        
+        // Start with existing frontmatter or create new
+        let mut fm = existing_fm.unwrap_or_else(|| JsonMap::new());
+
+        // Update/add properties
+        if let Some(props) = properties {
+            for (key, value) in props {
+                fm.insert(key, value);
+            }
+        }
+
+        // Remove properties
+        if let Some(keys_to_remove) = remove {
+            for key in keys_to_remove {
+                fm.remove(&key);
+            }
+        }
+
+        // Format with updated frontmatter
+        let new_content = Self::format_with_frontmatter(&body, Some(&fm));
+
+        match fs::write(&full_path, new_content) {
+            Ok(_) => Json(OperationResult {
+                success: true,
+                path: Some(path_with_ext),
+                error: None,
+                deleted_path: None,
+            }),
+            Err(e) => {
+                eprintln!("Failed to write file: {}", e);
+                Json(OperationResult {
+                    success: false,
+                    path: None,
+                    error: Some(format!("{}", e)),
+                    deleted_path: None,
+                })
+            }
+        }
+    }
+
+    #[tool(description = "Create note from template with variable substitution. Template path: if starts with '/' or contains ':', treated as absolute path relative to vault root; otherwise relative to templates directory (paths from list_notes_templates can be used directly). Destination path SHOULD include .md extension. Replaces {{variable}} placeholders in template with values from variables map. Creates parent directories if needed.")]
     pub fn create_note_from_template(
         &self,
         Parameters(CreateNoteFromTemplateRequest { path, template_path, variables }): Parameters<CreateNoteFromTemplateRequest>,
@@ -934,7 +1227,7 @@ impl ObsidianService {
         }
     }
 
-    #[tool(description = "List all available Notes templates in the templates directory with their paths and basic metadata. Helps discover existing templates before creating notes from them. Returns template names, paths, and optionally sample content previews.")]
+    #[tool(description = "List all .md template files in templates directory. Returns paths relative to templates directory (can be used directly with create_note_from_template). Templates directory is configured templates_path or 'templates/' in vault root. Returns template file paths, names, and sizes. Returns empty array if templates directory doesn't exist.")]
     pub fn list_notes_templates(&self) -> Json<Vec<DirectoryItem>> {
         let templates_dir = self.templates_path.as_ref()
             .map(|p| self.vault_root.join(p))
@@ -950,7 +1243,9 @@ impl ObsidianService {
             {
                 let entry_path = entry.path();
                 if entry_path.is_file() && entry_path.extension().and_then(|s| s.to_str()) == Some("md") {
-                    if let Ok(rel_path) = entry_path.strip_prefix(&self.vault_root) {
+                    // Return path relative to templates directory (not vault root)
+                    // This allows direct use with create_note_from_template
+                    if let Ok(rel_path) = entry_path.strip_prefix(&templates_dir) {
                         let metadata = entry.metadata().ok();
                         items.push(DirectoryItem {
                             path: rel_path.to_string_lossy().to_string(),

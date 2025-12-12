@@ -194,7 +194,9 @@ class MCPServerTester:
             "get_daily_note",
             "search_vault",
             "find_related_notes",
-            "edit_note_text",
+            "replace_text_in_note",
+            "append_to_section",
+            "update_note_properties",
             "create_note_from_template",
             "list_notes_templates"
         ]
