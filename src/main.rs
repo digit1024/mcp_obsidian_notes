@@ -1,4 +1,5 @@
 mod service;
+mod template_processor;
 
 use anyhow::{Context, Result};
 use rmcp::ServiceExt;

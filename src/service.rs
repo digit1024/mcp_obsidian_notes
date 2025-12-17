@@ -12,6 +12,7 @@ use chrono::{Local, NaiveDate};
 use regex::Regex;
 use walkdir::WalkDir;
 use std::fs;
+use crate::template_processor::TemplateProcessor;
 
 pub struct ObsidianService {
     vault_root: PathBuf,
@@ -1186,12 +1187,8 @@ impl ObsidianService {
         
         let variables = variables.unwrap_or_default();
 
-        // Replace {{variable}} placeholders
-        let mut final_content = template_content;
-        for (key, value) in variables {
-            let placeholder = format!("{{{{{}}}}}", key);
-            final_content = final_content.replace(&placeholder, &value);
-        }
+        // Process template: date expressions, numeric calculations, then variable substitution
+        let final_content = TemplateProcessor::process(&template_content, &variables);
 
         // Write to destination (ensure .md extension)
         let final_path = self.ensure_md_extension(&path);
