@@ -138,7 +138,7 @@ class MCPServerTester:
         print("="*60)
         
         response = self.send_request("initialize", {
-            "protocolVersion": "2024-11-05",
+            "protocolVersion": "2025-06-18",
             "capabilities": {},
             "clientInfo": {
                 "name": "test-client",
@@ -148,7 +148,9 @@ class MCPServerTester:
         
         assert response.get("jsonrpc") == "2.0", "Invalid JSON-RPC version"
         assert "result" in response, "No result in response"
-        assert response["result"].get("protocolVersion") == "2024-11-05", "Wrong protocol version"
+        # Accept protocol versions that rmcp may negotiate
+        protocol_version = response["result"].get("protocolVersion")
+        assert protocol_version in ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"], f"Unexpected protocol version: {protocol_version}"
         assert "capabilities" in response["result"], "No capabilities in result"
         assert "serverInfo" in response["result"], "No serverInfo in result"
         
@@ -232,7 +234,9 @@ class MCPServerTester:
         
         # Parse the JSON response
         import json
-        templates = json.loads(content[0].get("text", "[]"))
+        response_data = json.loads(content[0].get("text", "{}"))
+        # New format wraps arrays in objects (e.g., {"items": [...]})
+        templates = response_data.get("items", []) if isinstance(response_data, dict) else response_data
         print(f"\n✓ Found {len(templates)} templates:")
         for template in templates[:5]:  # Show first 5
             print(f"  - {template.get('name')} ({template.get('path')})")
@@ -267,7 +271,9 @@ class MCPServerTester:
         
         # Parse the JSON response
         import json
-        items = json.loads(content[0].get("text", "[]"))
+        response_data = json.loads(content[0].get("text", "{}"))
+        # New format wraps arrays in objects (e.g., {"items": [...]})
+        items = response_data.get("items", []) if isinstance(response_data, dict) else response_data
         print(f"\n✓ Found {len(items)} items in directory:")
         for item in items[:10]:  # Show first 10
             item_type = "file" if item.get("is_file") else "directory"

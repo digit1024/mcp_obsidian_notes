@@ -45,6 +45,11 @@ pub struct DirectoryItem {
 }
 
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DirectoryItemList {
+    pub items: Vec<DirectoryItem>,
+}
+
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ReadNotesFileRequest {
     #[schemars(description = "Path to the note file relative to vault root. Can include or omit .md extension (auto-added if missing)")]
     pub path: String,
@@ -98,6 +103,11 @@ pub struct SearchResult {
 }
 
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SearchResultList {
+    pub results: Vec<SearchResult>,
+}
+
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct FindRelatedNotesRequest {
     #[schemars(description = "Path to the source note relative to vault root. Can include or omit .md extension (auto-added)")]
     pub path: String,
@@ -138,6 +148,21 @@ pub struct UpdateNotePropertiesRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct GetNotePropertiesRequest {
+    #[schemars(description = "Path to the note file relative to vault root. Can include or omit .md extension (auto-added)")]
+    pub path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[schemars(description = "Note properties (frontmatter)")]
+pub struct NoteProperties {
+    #[schemars(description = "YAML frontmatter properties as key-value pairs. Returns null if note has no frontmatter or note doesn't exist")]
+    pub properties: Option<serde_json::Map<String, serde_json::Value>>,
+    #[schemars(description = "Error message if note not found or couldn't be read")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CreateNoteFromTemplateRequest {
     #[schemars(description = "Destination path for the new note relative to vault root. SHOULD include .md extension")]
     pub path: String,
@@ -148,6 +173,7 @@ pub struct CreateNoteFromTemplateRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[schemars(description = "Result of an operation")]
 pub struct OperationResult {
     pub success: bool,
     #[schemars(description = "Path of the affected file")]
@@ -345,7 +371,7 @@ impl ObsidianService {
     pub fn list_notes_directory(
         &self,
         Parameters(ListNotesDirectoryRequest { path, limit, offset, recursive }): Parameters<ListNotesDirectoryRequest>,
-    ) -> Json<Vec<DirectoryItem>> {
+    ) -> Json<DirectoryItemList> {
         let path = path.unwrap_or_else(|| ".".to_string());
         let limit = limit.unwrap_or(50) as usize;
         let offset = offset.unwrap_or(0) as usize;
@@ -355,7 +381,7 @@ impl ObsidianService {
             Ok(p) => p,
             Err(e) => {
                 eprintln!("Invalid path: {}", e);
-                return Json(Vec::new());
+                return Json(DirectoryItemList { items: Vec::new() });
             }
         };
 
@@ -405,7 +431,7 @@ impl ObsidianService {
             }
         }
 
-        Json(items)
+        Json(DirectoryItemList { items })
     }
 
     #[tool(description = "Read a markdown note file from the vault. Path can include or omit .md extension (auto-added if missing). Path is relative to vault root. Returns content body (without frontmatter) and frontmatter separately as YAML metadata.")]
@@ -628,7 +654,7 @@ impl ObsidianService {
     pub fn search_vault(
         &self,
         Parameters(SearchVaultRequest { query, scope, path_filter }): Parameters<SearchVaultRequest>,
-    ) -> Json<Vec<SearchResult>> {
+    ) -> Json<SearchResultList> {
         let scope = scope.unwrap_or_else(|| vec!["content".to_string(), "filename".to_string()]);
         let query_regex = Regex::new(&regex::escape(&query)).ok();
         let mut results = Vec::new();
@@ -638,7 +664,7 @@ impl ObsidianService {
                 Ok(p) => p,
                 Err(e) => {
                     eprintln!("Invalid path filter: {}", e);
-                    return Json(Vec::new());
+                    return Json(SearchResultList { results: Vec::new() });
                 }
             }
         } else {
@@ -720,14 +746,14 @@ impl ObsidianService {
             }
         }
 
-        Json(results)
+        Json(SearchResultList { results })
     }
 
     #[tool(description = "Find notes related to a source note. Extracts tags from source note's frontmatter and wikilinks [[...]] from content. Finds other notes that: (1) have matching tags in frontmatter, or (2) have filenames matching extracted link names. 'on' parameter controls which relationships to use: 'tags' and/or 'links'. Path is relative to vault root. Returns empty array if source note not found.")]
     pub fn find_related_notes(
         &self,
         Parameters(FindRelatedNotesRequest { path, on }): Parameters<FindRelatedNotesRequest>,
-    ) -> Json<Vec<SearchResult>> {
+    ) -> Json<SearchResultList> {
         let on = on.unwrap_or_else(|| vec!["tags".to_string(), "links".to_string()]);
         
         let path_with_ext = self.ensure_md_extension(&path);
@@ -740,13 +766,13 @@ impl ObsidianService {
                     }
                     Err(e) => {
                         eprintln!("Failed to read file {}: {}", path_with_ext, e);
-                        return Json(Vec::new());
+                        return Json(SearchResultList { results: Vec::new() });
                     }
                 }
             }
             Err(e) => {
                 eprintln!("Invalid path {}: {}", path_with_ext, e);
-                return Json(Vec::new());
+                return Json(SearchResultList { results: Vec::new() });
             }
         };
 
@@ -817,7 +843,7 @@ impl ObsidianService {
             }
         }
 
-        Json(related)
+        Json(SearchResultList { results: related })
     }
 
     #[tool(description = "Replace text in a note. Finds target text and replaces it with new content. replace_all (default: true) controls whether to replace all occurrences or just the first. Path is relative to vault root, .md extension auto-added. Returns error if target text not found.")]
@@ -1061,7 +1087,7 @@ impl ObsidianService {
         }
     }
 
-    #[tool(description = "Update frontmatter properties (Obsidian properties) in a note. Updates/adds properties from 'properties' map and removes properties listed in 'remove'. Does not modify note content body. Creates frontmatter if it doesn't exist. Path is relative to vault root, .md extension auto-added.")]
+    #[tool(description = "Update frontmatter properties (Obsidian metadata) without modifying note content. Use to change tags, status, dates, or custom properties. Properties overwrite existing keys; arrays replace entirely (tags: [\"tag1\", \"tag2\"] replaces all tags). Supports strings, numbers, booleans, arrays, dates. Use 'remove' to delete properties. Creates frontmatter if missing. Path relative to vault root, .md extension auto-added.")]
     pub fn update_note_properties(
         &self,
         Parameters(UpdateNotePropertiesRequest { path, properties, remove }): Parameters<UpdateNotePropertiesRequest>,
@@ -1133,6 +1159,43 @@ impl ObsidianService {
                 })
             }
         }
+    }
+
+    #[tool(description = "Get frontmatter properties (Obsidian metadata) from a note. Returns only the properties, not the note content. Returns null properties if note has no frontmatter. Path relative to vault root, .md extension auto-added.")]
+    pub fn get_note_properties(
+        &self,
+        Parameters(GetNotePropertiesRequest { path }): Parameters<GetNotePropertiesRequest>,
+    ) -> Json<NoteProperties> {
+        let path_with_ext = self.ensure_md_extension(&path);
+        let full_path = match self.validate_path(&path_with_ext) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("Invalid path {}: {}", path, e);
+                return Json(NoteProperties {
+                    properties: None,
+                    error: Some(format!("{}", e)),
+                });
+            }
+        };
+
+        let file_content = match fs::read_to_string(&full_path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Failed to read file {}: {}", path, e);
+                return Json(NoteProperties {
+                    properties: None,
+                    error: Some(format!("{}", e)),
+                });
+            }
+        };
+
+        // Parse frontmatter
+        let (frontmatter, _) = Self::parse_frontmatter(&file_content);
+        
+        Json(NoteProperties {
+            properties: frontmatter,
+            error: None,
+        })
     }
 
     #[tool(description = "Create note from template with variable substitution. Template path: if starts with '/' or contains ':', treated as absolute path relative to vault root; otherwise relative to templates directory (paths from list_notes_templates can be used directly). Destination path SHOULD include .md extension. Replaces {{variable}} placeholders in template with values from variables map. Creates parent directories if needed.")]
@@ -1225,7 +1288,7 @@ impl ObsidianService {
     }
 
     #[tool(description = "List all .md template files in templates directory. Returns paths relative to templates directory (can be used directly with create_note_from_template). Templates directory is configured templates_path or 'templates/' in vault root. Returns template file paths, names, and sizes. Returns empty array if templates directory doesn't exist.")]
-    pub fn list_notes_templates(&self) -> Json<Vec<DirectoryItem>> {
+    pub fn list_notes_templates(&self) -> Json<DirectoryItemList> {
         let templates_dir = self.templates_path.as_ref()
             .map(|p| self.vault_root.join(p))
             .unwrap_or_else(|| self.vault_root.join("templates"));
@@ -1255,11 +1318,11 @@ impl ObsidianService {
             }
         }
 
-        Json(items)
+        Json(DirectoryItemList { items })
     }
 }
 
-#[tool_handler]
+#[tool_handler(router = self.tool_router)]
 impl ServerHandler for ObsidianService {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
