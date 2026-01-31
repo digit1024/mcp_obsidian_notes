@@ -3,7 +3,13 @@ name = "mcp_obsidian_notes"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "obsidian-cli"
+path = "src/cli.rs"
+
 [dependencies]
+clap = { version = "4", features = ["derive"] }
+dirs = "5"
 rmcp = { version = "0.12.0", features = ["server", "transport-io"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }

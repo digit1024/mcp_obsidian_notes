@@ -367,21 +367,17 @@ impl ObsidianService {
         anyhow::bail!("Daily note not found for date: {}", date_str);
     }
 
-    #[tool(description = "List files and directories in a vault directory. Returns both files and directories by default. When recursive=true, only returns .md files from subdirectories. Path is relative to vault root (use '.' for root). Returns empty array if path doesn't exist.")]
-    pub fn list_notes_directory(
-        &self,
-        Parameters(ListNotesDirectoryRequest { path, limit, offset, recursive }): Parameters<ListNotesDirectoryRequest>,
-    ) -> Json<DirectoryItemList> {
-        let path = path.unwrap_or_else(|| ".".to_string());
-        let limit = limit.unwrap_or(50) as usize;
-        let offset = offset.unwrap_or(0) as usize;
-        let recursive = recursive.unwrap_or(false);
+    pub(crate) fn list_notes_directory_impl(&self, req: ListNotesDirectoryRequest) -> DirectoryItemList {
+        let path = req.path.unwrap_or_else(|| ".".to_string());
+        let limit = req.limit.unwrap_or(50) as usize;
+        let offset = req.offset.unwrap_or(0) as usize;
+        let recursive = req.recursive.unwrap_or(false);
 
         let dir_path = match self.validate_path(&path) {
             Ok(p) => p,
             Err(e) => {
                 eprintln!("Invalid path: {}", e);
-                return Json(DirectoryItemList { items: Vec::new() });
+                return DirectoryItemList { items: Vec::new() };
             }
         };
 
@@ -431,49 +427,58 @@ impl ObsidianService {
             }
         }
 
-        Json(DirectoryItemList { items })
+        DirectoryItemList { items }
     }
 
-    #[tool(description = "Read a markdown note file from the vault. Path can include or omit .md extension (auto-added if missing). Path is relative to vault root. Returns content body (without frontmatter) and frontmatter separately as YAML metadata.")]
-    pub fn read_notes_file(
+    #[tool(description = "List files and directories in a vault directory. Returns both files and directories by default. When recursive=true, only returns .md files from subdirectories. Path is relative to vault root (use '.' for root). Returns empty array if path doesn't exist.")]
+    pub fn list_notes_directory(
         &self,
-        Parameters(ReadNotesFileRequest { path }): Parameters<ReadNotesFileRequest>,
-    ) -> Json<FileContent> {
-        let path_with_ext = self.ensure_md_extension(&path);
+        Parameters(req): Parameters<ListNotesDirectoryRequest>,
+    ) -> Json<DirectoryItemList> {
+        Json(self.list_notes_directory_impl(req))
+    }
+
+    pub(crate) fn read_notes_file_impl(&self, req: ReadNotesFileRequest) -> FileContent {
+        let path_with_ext = self.ensure_md_extension(&req.path);
         match self.validate_path(&path_with_ext) {
             Ok(full_path) => {
                 match fs::read_to_string(&full_path) {
                     Ok(content) => {
                         let (frontmatter, body) = Self::parse_frontmatter(&content);
-                        Json(FileContent {
+                        FileContent {
                             content: body,
                             frontmatter,
-                        })
+                        }
                     }
                     Err(e) => {
                         eprintln!("Failed to read file {}: {}", path_with_ext, e);
-                        Json(FileContent {
+                        FileContent {
                             content: format!("Error reading file: {}", e),
                             frontmatter: None,
-                        })
+                        }
                     }
                 }
             }
             Err(e) => {
                 eprintln!("Invalid path {}: {}", path_with_ext, e);
-                Json(FileContent {
+                FileContent {
                     content: format!("Error: {}", e),
                     frontmatter: None,
-                })
+                }
             }
         }
     }
 
-    #[tool(description = "Delete a file or directory from the vault. For files, path can include or omit .md extension. For directories, path must not include .md extension. Deletes directories recursively. Path is relative to vault root. Returns error if path doesn't exist.")]
-    pub fn delete_notes_item(
+    #[tool(description = "Read a markdown note file from the vault. Path can include or omit .md extension (auto-added if missing). Path is relative to vault root. Returns content body (without frontmatter) and frontmatter separately as YAML metadata.")]
+    pub fn read_notes_file(
         &self,
-        Parameters(DeleteNotesItemRequest { path }): Parameters<DeleteNotesItemRequest>,
-    ) -> Json<OperationResult> {
+        Parameters(req): Parameters<ReadNotesFileRequest>,
+    ) -> Json<FileContent> {
+        Json(self.read_notes_file_impl(req))
+    }
+
+    pub(crate) fn delete_notes_item_impl(&self, req: DeleteNotesItemRequest) -> OperationResult {
+        let path = req.path;
         // Try with .md extension first (for files), then without (for directories)
         let path_with_ext = self.ensure_md_extension(&path);
         let result = match self.validate_path(&path_with_ext) {
@@ -496,42 +501,46 @@ impl ObsidianService {
                     }
                     Err(e) => {
                         eprintln!("Invalid path {}: {}", path, e);
-                        return Json(OperationResult {
+                        return OperationResult {
                             success: false,
                             path: None,
                             error: Some(format!("{}", e)),
                             deleted_path: None,
-                        });
+                        };
                     }
                 }
             }
         };
 
         match result {
-                
-            Ok(_) => Json(OperationResult {
+            Ok(_) => OperationResult {
                 success: true,
                 path: None,
                 error: None,
                 deleted_path: Some(path),
-            }),
+            },
             Err(e) => {
                 eprintln!("Failed to delete {}: {}", path, e);
-                Json(OperationResult {
+                OperationResult {
                     success: false,
                     path: None,
                     error: Some(format!("{}", e)),
                     deleted_path: None,
-                })
+                }
             }
         }
     }
 
-    #[tool(description = "Create a new note or update existing one. Path should NOT include .md extension (auto-added). Mode options: 'overwrite' (default) - replaces entire file, 'append' - adds content after existing body, 'prepend' - adds content before existing body. Frontmatter is merged (new keys added, existing keys updated). Creates parent directories if needed. Path is relative to vault root.")]
-    pub fn create_or_update_note(
+    #[tool(description = "Delete a file or directory from the vault. For files, path can include or omit .md extension. For directories, path must not include .md extension. Deletes directories recursively. Path is relative to vault root. Returns error if path doesn't exist.")]
+    pub fn delete_notes_item(
         &self,
-        Parameters(CreateOrUpdateNoteRequest { path, content, frontmatter, mode }): Parameters<CreateOrUpdateNoteRequest>,
+        Parameters(req): Parameters<DeleteNotesItemRequest>,
     ) -> Json<OperationResult> {
+        Json(self.delete_notes_item_impl(req))
+    }
+
+    pub(crate) fn create_or_update_note_impl(&self, req: CreateOrUpdateNoteRequest) -> OperationResult {
+        let CreateOrUpdateNoteRequest { path, content, frontmatter, mode } = req;
         let md_path = self.ensure_md_extension(&path);
         let full_path = self.vault_root.join(&md_path);
 
@@ -539,12 +548,12 @@ impl ObsidianService {
         if let Some(parent) = full_path.parent() {
             if let Err(e) = fs::create_dir_all(parent) {
                 eprintln!("Failed to create directory: {}", e);
-                return Json(OperationResult {
+                return OperationResult {
                     success: false,
                     path: None,
                     error: Some(format!("{}", e)),
                     deleted_path: None,
-                });
+                };
             }
         }
 
@@ -574,12 +583,12 @@ impl ObsidianService {
                 }
                 Err(e) => {
                     eprintln!("Failed to read existing file: {}", e);
-                    return Json(OperationResult {
+                    return OperationResult {
                         success: false,
                         path: None,
                         error: Some(format!("{}", e)),
                         deleted_path: None,
-                    });
+                    };
                 }
             }
         } else {
@@ -587,20 +596,69 @@ impl ObsidianService {
         };
 
         match fs::write(&full_path, final_content) {
-            Ok(_) => Json(OperationResult {
+            Ok(_) => OperationResult {
                 success: true,
                 path: Some(md_path),
                 error: None,
                 deleted_path: None,
-            }),
+            },
             Err(e) => {
                 eprintln!("Failed to write file: {}", e);
-                Json(OperationResult {
+                OperationResult {
                     success: false,
                     path: None,
                     error: Some(format!("{}", e)),
                     deleted_path: None,
-                })
+                }
+            }
+        }
+    }
+
+    #[tool(description = "Create a new note or update existing one. Path should NOT include .md extension (auto-added). Mode options: 'overwrite' (default) - replaces entire file, 'append' - adds content after existing body, 'prepend' - adds content before existing body. Frontmatter is merged (new keys added, existing keys updated). Creates parent directories if needed. Path is relative to vault root.")]
+    pub fn create_or_update_note(
+        &self,
+        Parameters(req): Parameters<CreateOrUpdateNoteRequest>,
+    ) -> Json<OperationResult> {
+        Json(self.create_or_update_note_impl(req))
+    }
+
+    pub(crate) fn get_daily_note_impl(&self, req: GetDailyNoteRequest) -> FileContent {
+        match Self::parse_date(req.date.as_ref()) {
+            Ok(target_date) => {
+                match self.find_daily_note(target_date) {
+                    Ok(note_path) => {
+                        match fs::read_to_string(&note_path) {
+                            Ok(content) => {
+                                let (frontmatter, body) = Self::parse_frontmatter(&content);
+                                FileContent {
+                                    content: body,
+                                    frontmatter,
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to read daily note: {}", e);
+                                FileContent {
+                                    content: format!("Error reading file: {}", e),
+                                    frontmatter: None,
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Daily note not found: {}", e);
+                        FileContent {
+                            content: format!("Error: {}", e),
+                            frontmatter: None,
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Invalid date: {}", e);
+                FileContent {
+                    content: format!("Error: {}", e),
+                    frontmatter: None,
+                }
             }
         }
     }
@@ -608,63 +666,22 @@ impl ObsidianService {
     #[tool(description = "Get daily note for a date. Date can be 'today' (default), 'yesterday', 'tomorrow', or 'YYYY-MM-DD' format. Searches common locations: configured daily_notes_path, root, 'daily/', 'Daily Notes/'. Returns error message in content field if note not found.")]
     pub fn get_daily_note(
         &self,
-        Parameters(GetDailyNoteRequest { date }): Parameters<GetDailyNoteRequest>,
+        Parameters(req): Parameters<GetDailyNoteRequest>,
     ) -> Json<FileContent> {
-        match Self::parse_date(date.as_ref()) {
-            Ok(target_date) => {
-                match self.find_daily_note(target_date) {
-                    Ok(note_path) => {
-                        match fs::read_to_string(&note_path) {
-                            Ok(content) => {
-                                let (frontmatter, body) = Self::parse_frontmatter(&content);
-                                Json(FileContent {
-                                    content: body,
-                                    frontmatter,
-                                })
-                            }
-                            Err(e) => {
-                                eprintln!("Failed to read daily note: {}", e);
-                                Json(FileContent {
-                                    content: format!("Error reading file: {}", e),
-                                    frontmatter: None,
-                                })
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Daily note not found: {}", e);
-                        Json(FileContent {
-                            content: format!("Error: {}", e),
-                            frontmatter: None,
-                        })
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("Invalid date: {}", e);
-                Json(FileContent {
-                    content: format!("Error: {}", e),
-                    frontmatter: None,
-                })
-            }
-        }
+        Json(self.get_daily_note_impl(req))
     }
 
-    #[tool(description = "Search for text in vault notes. Query is literal text (case-sensitive substring match). Scope options: 'content' (note body), 'filename' (file paths), 'tags' (frontmatter tags). Can specify multiple scopes. path_filter limits search to specific subdirectory (relative to vault root). Returns file paths and match previews.")]
-    pub fn search_vault(
-        &self,
-        Parameters(SearchVaultRequest { query, scope, path_filter }): Parameters<SearchVaultRequest>,
-    ) -> Json<SearchResultList> {
-        let scope = scope.unwrap_or_else(|| vec!["content".to_string(), "filename".to_string()]);
-        let query_regex = Regex::new(&regex::escape(&query)).ok();
+    pub(crate) fn search_vault_impl(&self, req: SearchVaultRequest) -> SearchResultList {
+        let scope = req.scope.unwrap_or_else(|| vec!["content".to_string(), "filename".to_string()]);
+        let query_regex = Regex::new(&regex::escape(&req.query)).ok();
         let mut results = Vec::new();
 
-        let search_root = if let Some(filter) = path_filter {
+        let search_root = if let Some(filter) = req.path_filter {
             match self.validate_path(&filter) {
                 Ok(p) => p,
                 Err(e) => {
                     eprintln!("Invalid path filter: {}", e);
-                    return Json(SearchResultList { results: Vec::new() });
+                    return SearchResultList { results: Vec::new() };
                 }
             }
         } else {
@@ -730,10 +747,10 @@ impl ObsidianService {
                                         match_preview: Some(preview),
                                     });
                                 }
-                            } else if content.contains(&query) {
-                                let idx = content.find(&query).unwrap_or(0);
+                            } else if content.contains(&req.query) {
+                                let idx = content.find(&req.query).unwrap_or(0);
                                 let start = idx.saturating_sub(50);
-                                let end = (idx + query.len() + 50).min(content.len());
+                                let end = (idx + req.query.len() + 50).min(content.len());
                                 let preview = content[start..end].to_string();
                                 results.push(SearchResult {
                                     path: rel_path_str.clone(),
@@ -746,17 +763,21 @@ impl ObsidianService {
             }
         }
 
-        Json(SearchResultList { results })
+        SearchResultList { results }
     }
 
-    #[tool(description = "Find notes related to a source note. Extracts tags from source note's frontmatter and wikilinks [[...]] from content. Finds other notes that: (1) have matching tags in frontmatter, or (2) have filenames matching extracted link names. 'on' parameter controls which relationships to use: 'tags' and/or 'links'. Path is relative to vault root. Returns empty array if source note not found.")]
-    pub fn find_related_notes(
+    #[tool(description = "Search for text in vault notes. Query is literal text (case-sensitive substring match). Scope options: 'content' (note body), 'filename' (file paths), 'tags' (frontmatter tags). Can specify multiple scopes. path_filter limits search to specific subdirectory (relative to vault root). Returns file paths and match previews.")]
+    pub fn search_vault(
         &self,
-        Parameters(FindRelatedNotesRequest { path, on }): Parameters<FindRelatedNotesRequest>,
+        Parameters(req): Parameters<SearchVaultRequest>,
     ) -> Json<SearchResultList> {
-        let on = on.unwrap_or_else(|| vec!["tags".to_string(), "links".to_string()]);
+        Json(self.search_vault_impl(req))
+    }
+
+    pub(crate) fn find_related_notes_impl(&self, req: FindRelatedNotesRequest) -> SearchResultList {
+        let on = req.on.unwrap_or_else(|| vec!["tags".to_string(), "links".to_string()]);
         
-        let path_with_ext = self.ensure_md_extension(&path);
+        let path_with_ext = self.ensure_md_extension(&req.path);
         let (frontmatter, body, full_path) = match self.validate_path(&path_with_ext) {
             Ok(full_path) => {
                 match fs::read_to_string(&full_path) {
@@ -766,13 +787,13 @@ impl ObsidianService {
                     }
                     Err(e) => {
                         eprintln!("Failed to read file {}: {}", path_with_ext, e);
-                        return Json(SearchResultList { results: Vec::new() });
+                        return SearchResultList { results: Vec::new() };
                     }
                 }
             }
             Err(e) => {
                 eprintln!("Invalid path {}: {}", path_with_ext, e);
-                return Json(SearchResultList { results: Vec::new() });
+                return SearchResultList { results: Vec::new() };
             }
         };
 
@@ -843,25 +864,30 @@ impl ObsidianService {
             }
         }
 
-        Json(SearchResultList { results: related })
+        SearchResultList { results: related }
     }
 
-    #[tool(description = "Replace text in a note. Finds target text and replaces it with new content. replace_all (default: true) controls whether to replace all occurrences or just the first. Path is relative to vault root, .md extension auto-added. Returns error if target text not found.")]
-    pub fn replace_text_in_note(
+    #[tool(description = "Find notes related to a source note. Extracts tags from source note's frontmatter and wikilinks [[...]] from content. Finds other notes that: (1) have matching tags in frontmatter, or (2) have filenames matching extracted link names. 'on' parameter controls which relationships to use: 'tags' and/or 'links'. Path is relative to vault root. Returns empty array if source note not found.")]
+    pub fn find_related_notes(
         &self,
-        Parameters(ReplaceTextInNoteRequest { path, find, replace, replace_all }): Parameters<ReplaceTextInNoteRequest>,
-    ) -> Json<OperationResult> {
+        Parameters(req): Parameters<FindRelatedNotesRequest>,
+    ) -> Json<SearchResultList> {
+        Json(self.find_related_notes_impl(req))
+    }
+
+    pub(crate) fn replace_text_in_note_impl(&self, req: ReplaceTextInNoteRequest) -> OperationResult {
+        let ReplaceTextInNoteRequest { path, find, replace, replace_all } = req;
         let path_with_ext = self.ensure_md_extension(&path);
         let full_path = match self.validate_path(&path_with_ext) {
             Ok(p) => p,
             Err(e) => {
                 eprintln!("Invalid path {}: {}", path, e);
-                return Json(OperationResult {
+                return OperationResult {
                     success: false,
                     path: None,
                     error: Some(format!("{}", e)),
                     deleted_path: None,
-                });
+                };
             }
         };
         
@@ -869,12 +895,12 @@ impl ObsidianService {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("Failed to read file {}: {}", path, e);
-                return Json(OperationResult {
+                return OperationResult {
                     success: false,
                     path: None,
                     error: Some(format!("{}", e)),
                     deleted_path: None,
-                });
+                };
             }
         };
 
@@ -884,23 +910,23 @@ impl ObsidianService {
             Ok(re) => re,
             Err(e) => {
                 eprintln!("Invalid regex pattern: {}", e);
-                return Json(OperationResult {
+                return OperationResult {
                     success: false,
                     path: None,
                     error: Some(format!("Invalid pattern: {}", e)),
                     deleted_path: None,
-                });
+                };
             }
         };
 
         if !find_regex.is_match(&file_content) {
             eprintln!("Target text not found in file");
-            return Json(OperationResult {
+            return OperationResult {
                 success: false,
                 path: None,
                 error: Some("Target text not found in file".to_string()),
                 deleted_path: None,
-            });
+            };
         }
 
         let new_content = if replace_all {
@@ -910,40 +936,45 @@ impl ObsidianService {
         };
 
         match fs::write(&full_path, new_content) {
-            Ok(_) => Json(OperationResult {
+            Ok(_) => OperationResult {
                 success: true,
                 path: Some(path_with_ext),
                 error: None,
                 deleted_path: None,
-            }),
+            },
             Err(e) => {
                 eprintln!("Failed to write file: {}", e);
-                Json(OperationResult {
+                OperationResult {
                     success: false,
                     path: None,
                     error: Some(format!("{}", e)),
                     deleted_path: None,
-                })
+                }
             }
         }
     }
 
-    #[tool(description = "Append text to a specific markdown section. section_header must include # markers (e.g., '## End day') and must match exactly (level and text). Appends content before the next header of the same or higher level (or at end of file). Returns error if: header level not specified, section not found, level mismatch, or multiple sections match. Path is relative to vault root, .md extension auto-added.")]
-    pub fn append_to_section(
+    #[tool(description = "Replace text in a note. Finds target text and replaces it with new content. replace_all (default: true) controls whether to replace all occurrences or just the first. Path is relative to vault root, .md extension auto-added. Returns error if target text not found.")]
+    pub fn replace_text_in_note(
         &self,
-        Parameters(AppendToSectionRequest { path, section_header, text_to_append }): Parameters<AppendToSectionRequest>,
+        Parameters(req): Parameters<ReplaceTextInNoteRequest>,
     ) -> Json<OperationResult> {
+        Json(self.replace_text_in_note_impl(req))
+    }
+
+    pub(crate) fn append_to_section_impl(&self, req: AppendToSectionRequest) -> OperationResult {
+        let AppendToSectionRequest { path, section_header, text_to_append } = req;
         let path_with_ext = self.ensure_md_extension(&path);
         let full_path = match self.validate_path(&path_with_ext) {
             Ok(p) => p,
             Err(e) => {
                 eprintln!("Invalid path {}: {}", path, e);
-                return Json(OperationResult {
+                return OperationResult {
                     success: false,
                     path: None,
                     error: Some(format!("{}", e)),
                     deleted_path: None,
-                });
+                };
             }
         };
 
@@ -951,12 +982,12 @@ impl ObsidianService {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("Failed to read file {}: {}", path, e);
-                return Json(OperationResult {
+                return OperationResult {
                     success: false,
                     path: None,
                     error: Some(format!("{}", e)),
                     deleted_path: None,
-                });
+                };
             }
         };
 
@@ -964,12 +995,12 @@ impl ObsidianService {
         let (target_level, target_text) = match Self::parse_section_header(&section_header) {
             Ok((level, text)) => (level, text),
             Err(e) => {
-                return Json(OperationResult {
+                return OperationResult {
                     success: false,
                     path: None,
                     error: Some(e),
                     deleted_path: None,
-                });
+                };
             }
         };
 
@@ -991,22 +1022,22 @@ impl ObsidianService {
                     let header_info: Vec<String> = all_headers.iter()
                         .map(|(line, level, _)| format!("'{}' at line {}", "#".repeat(*level as usize), line + 1))
                         .collect();
-                    return Json(OperationResult {
+                    return OperationResult {
                         success: false,
                         path: None,
                         error: Some(format!("Section not found. Header level mismatch. Looking for '{} {}' but found {}",
                             "#".repeat(target_level as usize), target_text, header_info.join(", "))),
                         deleted_path: None,
-                    });
+                    };
                 }
                 
-                return Json(OperationResult {
+                return OperationResult {
                     success: false,
                     path: None,
                     error: Some(format!("Section not found. No header matching '{} {}' found in file",
                         "#".repeat(target_level as usize), target_text)),
                     deleted_path: None,
-                });
+                };
             }
             1 => {
                 // Found exactly one match - proceed
@@ -1015,13 +1046,13 @@ impl ObsidianService {
                 let line_numbers: Vec<String> = matches.iter()
                     .map(|(line, _, _)| (line + 1).to_string())
                     .collect();
-                return Json(OperationResult {
+                return OperationResult {
                     success: false,
                     path: None,
                     error: Some(format!("Multiple sections found. Found {} headers matching '{} {}' at lines {}. Use replace_text_in_note for precise targeting.",
                         n, "#".repeat(target_level as usize), target_text, line_numbers.join(", "))),
                     deleted_path: None,
-                });
+                };
             }
         }
 
@@ -1069,40 +1100,45 @@ impl ObsidianService {
         let new_content = new_lines.join("\n");
         
         match fs::write(&full_path, new_content) {
-            Ok(_) => Json(OperationResult {
+            Ok(_) => OperationResult {
                 success: true,
                 path: Some(path_with_ext),
                 error: None,
                 deleted_path: None,
-            }),
+            },
             Err(e) => {
                 eprintln!("Failed to write file: {}", e);
-                Json(OperationResult {
+                OperationResult {
                     success: false,
                     path: None,
                     error: Some(format!("{}", e)),
                     deleted_path: None,
-                })
+                }
             }
         }
     }
 
-    #[tool(description = "Update frontmatter properties (Obsidian metadata) without modifying note content. Use to change tags, status, dates, or custom properties. Properties overwrite existing keys; arrays replace entirely (tags: [\"tag1\", \"tag2\"] replaces all tags). Supports strings, numbers, booleans, arrays, dates. Use 'remove' to delete properties. Creates frontmatter if missing. Path relative to vault root, .md extension auto-added.")]
-    pub fn update_note_properties(
+    #[tool(description = "Append text to a specific markdown section. section_header must include # markers (e.g., '## End day') and must match exactly (level and text). Appends content before the next header of the same or higher level (or at end of file). Returns error if: header level not specified, section not found, level mismatch, or multiple sections match. Path is relative to vault root, .md extension auto-added.")]
+    pub fn append_to_section(
         &self,
-        Parameters(UpdateNotePropertiesRequest { path, properties, remove }): Parameters<UpdateNotePropertiesRequest>,
+        Parameters(req): Parameters<AppendToSectionRequest>,
     ) -> Json<OperationResult> {
+        Json(self.append_to_section_impl(req))
+    }
+
+    pub(crate) fn update_note_properties_impl(&self, req: UpdateNotePropertiesRequest) -> OperationResult {
+        let UpdateNotePropertiesRequest { path, properties, remove } = req;
         let path_with_ext = self.ensure_md_extension(&path);
         let full_path = match self.validate_path(&path_with_ext) {
             Ok(p) => p,
             Err(e) => {
                 eprintln!("Invalid path {}: {}", path, e);
-                return Json(OperationResult {
+                return OperationResult {
                     success: false,
                     path: None,
                     error: Some(format!("{}", e)),
                     deleted_path: None,
-                });
+                };
             }
         };
 
@@ -1110,12 +1146,12 @@ impl ObsidianService {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("Failed to read file {}: {}", path, e);
-                return Json(OperationResult {
+                return OperationResult {
                     success: false,
                     path: None,
                     error: Some(format!("{}", e)),
                     deleted_path: None,
-                });
+                };
             }
         };
 
@@ -1143,78 +1179,87 @@ impl ObsidianService {
         let new_content = Self::format_with_frontmatter(&body, Some(&fm));
 
         match fs::write(&full_path, new_content) {
-            Ok(_) => Json(OperationResult {
+            Ok(_) => OperationResult {
                 success: true,
                 path: Some(path_with_ext),
                 error: None,
                 deleted_path: None,
-            }),
+            },
             Err(e) => {
                 eprintln!("Failed to write file: {}", e);
-                Json(OperationResult {
+                OperationResult {
                     success: false,
                     path: None,
                     error: Some(format!("{}", e)),
                     deleted_path: None,
-                })
+                }
             }
         }
     }
 
-    #[tool(description = "Get frontmatter properties (Obsidian metadata) from a note. Returns only the properties, not the note content. Returns null properties if note has no frontmatter. Path relative to vault root, .md extension auto-added.")]
-    pub fn get_note_properties(
+    #[tool(description = "Update frontmatter properties (Obsidian metadata) without modifying note content. Use to change tags, status, dates, or custom properties. Properties overwrite existing keys; arrays replace entirely (tags: [\"tag1\", \"tag2\"] replaces all tags). Supports strings, numbers, booleans, arrays, dates. Use 'remove' to delete properties. Creates frontmatter if missing. Path relative to vault root, .md extension auto-added.")]
+    pub fn update_note_properties(
         &self,
-        Parameters(GetNotePropertiesRequest { path }): Parameters<GetNotePropertiesRequest>,
-    ) -> Json<NoteProperties> {
-        let path_with_ext = self.ensure_md_extension(&path);
+        Parameters(req): Parameters<UpdateNotePropertiesRequest>,
+    ) -> Json<OperationResult> {
+        Json(self.update_note_properties_impl(req))
+    }
+
+    pub(crate) fn get_note_properties_impl(&self, req: GetNotePropertiesRequest) -> NoteProperties {
+        let path_with_ext = self.ensure_md_extension(&req.path);
         let full_path = match self.validate_path(&path_with_ext) {
             Ok(p) => p,
             Err(e) => {
-                eprintln!("Invalid path {}: {}", path, e);
-                return Json(NoteProperties {
+                eprintln!("Invalid path {}: {}", req.path, e);
+                return NoteProperties {
                     properties: None,
                     error: Some(format!("{}", e)),
-                });
+                };
             }
         };
 
         let file_content = match fs::read_to_string(&full_path) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("Failed to read file {}: {}", path, e);
-                return Json(NoteProperties {
+                eprintln!("Failed to read file {}: {}", req.path, e);
+                return NoteProperties {
                     properties: None,
                     error: Some(format!("{}", e)),
-                });
+                };
             }
         };
 
         // Parse frontmatter
         let (frontmatter, _) = Self::parse_frontmatter(&file_content);
         
-        Json(NoteProperties {
+        NoteProperties {
             properties: frontmatter,
             error: None,
-        })
+        }
     }
 
-    #[tool(description = "Create note from template with variable substitution. Template path: if starts with '/' or contains ':', treated as absolute path relative to vault root; otherwise relative to templates directory (paths from list_notes_templates can be used directly). Destination path SHOULD include .md extension. Replaces {{variable}} placeholders in template with values from variables map. Creates parent directories if needed.")]
-    pub fn create_note_from_template(
+    #[tool(description = "Get frontmatter properties (Obsidian metadata) from a note. Returns only the properties, not the note content. Returns null properties if note has no frontmatter. Path relative to vault root, .md extension auto-added.")]
+    pub fn get_note_properties(
         &self,
-        Parameters(CreateNoteFromTemplateRequest { path, template_path, variables }): Parameters<CreateNoteFromTemplateRequest>,
-    ) -> Json<OperationResult> {
+        Parameters(req): Parameters<GetNotePropertiesRequest>,
+    ) -> Json<NoteProperties> {
+        Json(self.get_note_properties_impl(req))
+    }
+
+    pub(crate) fn create_note_from_template_impl(&self, req: CreateNoteFromTemplateRequest) -> OperationResult {
+        let CreateNoteFromTemplateRequest { path, template_path, variables } = req;
         let template_full = if template_path.starts_with('/') || template_path.contains(':') {
             // Absolute path
             match self.validate_path(&template_path) {
                 Ok(p) => p,
                 Err(e) => {
                     eprintln!("Invalid template path {}: {}", template_path, e);
-                    return Json(OperationResult {
-                    success: false,
-                    path: None,
-                    error: Some(format!("{}", e)),
-                    deleted_path: None,
-                });
+                    return OperationResult {
+                        success: false,
+                        path: None,
+                        error: Some(format!("{}", e)),
+                        deleted_path: None,
+                    };
                 }
             }
         } else {
@@ -1227,24 +1272,24 @@ impl ObsidianService {
 
         if !template_full.exists() {
             eprintln!("Template file not found: {}", template_path);
-            return Json(OperationResult {
+            return OperationResult {
                 success: false,
                 path: None,
                 error: Some(format!("Template file not found: {}", template_path)),
                 deleted_path: None,
-            });
+            };
         }
 
         let template_content = match fs::read_to_string(&template_full) {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("Failed to read template: {}", e);
-                return Json(OperationResult {
+                return OperationResult {
                     success: false,
                     path: None,
                     error: Some(format!("{}", e)),
                     deleted_path: None,
-                });
+                };
             }
         };
         
@@ -1259,36 +1304,43 @@ impl ObsidianService {
         if let Some(parent) = dest_path.parent() {
             if let Err(e) = fs::create_dir_all(parent) {
                 eprintln!("Failed to create directory: {}", e);
-                return Json(OperationResult {
+                return OperationResult {
                     success: false,
                     path: None,
                     error: Some(format!("{}", e)),
                     deleted_path: None,
-                });
+                };
             }
         }
 
         match fs::write(&dest_path, final_content) {
-            Ok(_) => Json(OperationResult {
+            Ok(_) => OperationResult {
                 success: true,
                 path: Some(final_path),
                 error: None,
                 deleted_path: None,
-            }),
+            },
             Err(e) => {
                 eprintln!("Failed to write file: {}", e);
-                Json(OperationResult {
+                OperationResult {
                     success: false,
                     path: None,
                     error: Some(format!("{}", e)),
                     deleted_path: None,
-                })
+                }
             }
         }
     }
 
-    #[tool(description = "List all .md template files in templates directory. Returns paths relative to templates directory (can be used directly with create_note_from_template). Templates directory is configured templates_path or 'templates/' in vault root. Returns template file paths, names, and sizes. Returns empty array if templates directory doesn't exist.")]
-    pub fn list_notes_templates(&self) -> Json<DirectoryItemList> {
+    #[tool(description = "Create note from template with variable substitution. Template path: if starts with '/' or contains ':', treated as absolute path relative to vault root; otherwise relative to templates directory (paths from list_notes_templates can be used directly). Destination path SHOULD include .md extension. Replaces {{variable}} placeholders in template with values from variables map. Creates parent directories if needed.")]
+    pub fn create_note_from_template(
+        &self,
+        Parameters(req): Parameters<CreateNoteFromTemplateRequest>,
+    ) -> Json<OperationResult> {
+        Json(self.create_note_from_template_impl(req))
+    }
+
+    pub(crate) fn list_notes_templates_impl(&self) -> DirectoryItemList {
         let templates_dir = self.templates_path.as_ref()
             .map(|p| self.vault_root.join(p))
             .unwrap_or_else(|| self.vault_root.join("templates"));
@@ -1318,7 +1370,12 @@ impl ObsidianService {
             }
         }
 
-        Json(DirectoryItemList { items })
+        DirectoryItemList { items }
+    }
+
+    #[tool(description = "List all .md template files in templates directory. Returns paths relative to templates directory (can be used directly with create_note_from_template). Templates directory is configured templates_path or 'templates/' in vault root. Returns template file paths, names, and sizes. Returns empty array if templates directory doesn't exist.")]
+    pub fn list_notes_templates(&self) -> Json<DirectoryItemList> {
+        Json(self.list_notes_templates_impl())
     }
 }
 
