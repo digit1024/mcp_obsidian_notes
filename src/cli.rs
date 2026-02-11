@@ -152,8 +152,41 @@ fn parse_key_value_pairs(pairs: Vec<String>) -> Result<HashMap<String, serde_jso
     let mut map = HashMap::new();
     for s in pairs {
         if let Some((k, v)) = s.split_once('=') {
-            let val: serde_json::Value = serde_json::from_str(v).unwrap_or(serde_json::Value::String(v.to_string()));
-            map.insert(k.to_string(), val);
+            let v = v.trim();
+
+            // 1. Try valid JSON first (handles ["a","b"], true, 42, "quoted string", etc.)
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(v) {
+                map.insert(k.to_string(), val);
+                continue;
+            }
+
+            // 2. Bracket-wrapped list without quotes: [daily, note] → JSON array
+            if v.starts_with('[') && v.ends_with(']') {
+                let inner = &v[1..v.len() - 1];
+                let items: Vec<serde_json::Value> = inner
+                    .split(',')
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| serde_json::Value::String(s.to_string()))
+                    .collect();
+                map.insert(k.to_string(), serde_json::Value::Array(items));
+                continue;
+            }
+
+            // 3. Comma-separated without brackets: daily, note → JSON array
+            if v.contains(',') {
+                let items: Vec<serde_json::Value> = v
+                    .split(',')
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| serde_json::Value::String(s.to_string()))
+                    .collect();
+                map.insert(k.to_string(), serde_json::Value::Array(items));
+                continue;
+            }
+
+            // 4. Plain string
+            map.insert(k.to_string(), serde_json::Value::String(v.to_string()));
         }
     }
     Ok(map)
